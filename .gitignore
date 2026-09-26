@@ -1,0 +1,7 @@
+# Python environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+
+# Generated model and local logs
+build.log
