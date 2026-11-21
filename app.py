@@ -1,15 +1,13 @@
-"""Web demo for the music search database and similarity engine."""
+"""Giao diện tìm kiếm âm thanh tương đồng."""
 
 from pathlib import Path
 import sqlite3
 import tempfile
 
-import joblib
 import numpy as np
 import pandas as pd
 import streamlit as st
 
-from src.feature_extraction import extract_features
 from src.similarity import search_similar
 
 
@@ -17,48 +15,270 @@ ROOT = Path(__file__).parent
 DATABASE_PATH = ROOT / "database" / "music.db"
 SCALER_PATH = ROOT / "models" / "scaler.pkl"
 AUDIO_TYPES = ["wav", "mp3", "flac", "ogg", "m4a"]
-FEATURE_GROUPS = {
-    "MFCC": (0, 40),
-    "Chroma": (40, 64),
-    "Độ tương phản phổ": (64, 78),
-    "Tâm trọng phổ": (78, 80),
-    "Độ rộng phổ": (80, 82),
-    "Ngưỡng cuộn phổ": (82, 84),
-    "Độ phẳng phổ": (84, 86),
-    "Tỉ lệ qua điểm 0": (86, 88),
-    "Năng lượng RMS": (88, 90),
+INSTRUMENT_NAMES = {
+    "accordion": "Phím kéo",
+    "acoustic_guitar": "Guitar acoustic",
+    "banjo": "Banjo",
+    "drum": "Trống",
+    "flute": "Sáo",
+    "piano": "Piano",
+    "saxophone": "Saxophone",
+    "trumpet": "Kèn trumpet",
+    "violin": "Violin",
 }
 
-st.set_page_config(page_title="Resonance | Tìm kiếm âm thanh", page_icon="R", layout="wide")
+st.set_page_config(
+    page_title="Tìm kiếm âm thanh",
+    page_icon="",
+    layout="wide",
+)
+
 st.markdown(
     """
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap');
-    :root { --ink: #152323; --muted: #65716f; --mint: #b9e8cf; --coral: #ff8068; --line: #d6e0d8; }
-    html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; color: var(--ink); }
-    .stApp { background: radial-gradient(circle at 85% 3%, #d9f0e0 0, transparent 28%), linear-gradient(135deg, #f8f6f0 0%, #edf4ee 100%); }
-    .block-container { padding-top: 2rem; max-width: 1240px; }
-    h1, h2, h3 { letter-spacing: 0; }
-    h1 { font-size: clamp(2.4rem, 5vw, 5.3rem) !important; line-height: .92 !important; max-width: 780px; margin-bottom: .45rem !important; }
-    .eyebrow { font-family: 'DM Mono', monospace; color: #df5c48; font-size: .76rem; letter-spacing: .12em; text-transform: uppercase; }
-    .lede { color: var(--muted); font-size: 1.08rem; max-width: 640px; line-height: 1.55; margin-top: .75rem; }
-    .status-line { display: inline-flex; align-items: center; gap: .5rem; margin-top: 1.1rem; padding: .48rem .72rem; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.58); color: #445250; font-family: 'DM Mono', monospace; font-size: .7rem; letter-spacing: .04em; text-transform: uppercase; }
-    .status-dot { width: .5rem; height: .5rem; border-radius: 50%; background: #4eaf78; box-shadow: 0 0 0 .22rem rgba(78,175,120,.15); }
-    .hero-rule { height: 1px; background: linear-gradient(90deg, var(--ink), var(--line) 65%, transparent); margin: 1.5rem 0 .25rem; }
-    .metric-card { border-top: 2px solid var(--ink); padding: .8rem 0; }
-    .metric-value { font-size: 2.1rem; font-weight: 700; letter-spacing: -.04em; }
-    .metric-label { color: var(--muted); font-size: .82rem; }
-    .result-card { background: rgba(255,255,255,.72); border: 1px solid #dce5dc; border-radius: 8px; padding: 1rem 1.15rem; margin: .55rem 0; }
-    .rank { font-family: 'DM Mono', monospace; color: #df5c48; font-size: .85rem; }
-    .result-title { font-size: 1.15rem; font-weight: 700; }
-    .path { color: var(--muted); font-family: 'DM Mono', monospace; font-size: .72rem; overflow-wrap: anywhere; }
-    div[data-testid="stMetric"] { background: rgba(255,255,255,.62); border: 1px solid #dce5dc; padding: .8rem; border-radius: 8px; }
-    div[data-testid="stFileUploader"] section { border: 1px dashed #9eb4a8; border-radius: 10px; background: rgba(255,255,255,.5); padding: 1.25rem; transition: border-color .2s, background .2s; }
-    div[data-testid="stFileUploader"] section:hover { border-color: #df5c48; background: rgba(255,255,255,.85); }
-    div[data-baseweb="tab-list"] { gap: .35rem; border-bottom: 1px solid var(--line); }
-    button[data-baseweb="tab"] { padding: .65rem .9rem; }
-    .section-kicker { color: #df5c48; font-family: 'DM Mono', monospace; font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; margin-bottom: -.55rem; }
-    @media (max-width: 700px) { .block-container { padding: 1.25rem 1rem 2rem; } h1 { font-size: 3.15rem !important; } .lede { font-size: .98rem; } .metric-value { font-size: 1.6rem; } }
+    @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
+    :root {
+        --navy: #17232f;
+        --blue: #3157d5;
+        --blue-soft: #edf2ff;
+        --paper: #FFDEAD;
+        --line: #e3e7ef;
+        --muted: #697586;
+        --green: #18a56f;
+    }
+    html, body, [class*="css"] {
+        font-family: 'Manrope', sans-serif;
+    }
+    .stApp,
+    .stApp * {
+        color: #000000 !important;
+    }
+    .stButton > button[kind="primary"],
+    .stButton > button[kind="primary"] * {
+        color: #ffffff !important;
+    }
+    input, textarea {
+        color: #000000 !important;
+    }
+    .stApp {
+        background: var(--paper);
+    }
+    .block-container {
+        max-width: 1180px;
+        padding-top: 2.2rem;
+        padding-bottom: 4rem;
+    }
+    header[data-testid="stHeader"] {
+        background: transparent;
+    }
+    h1, h2, h3 {
+        color: var(--navy);
+        letter-spacing: -0.035em;
+    }
+    h1 {
+        font-size: 3.35rem !important;
+        line-height: 1.05 !important;
+        margin-bottom: .35rem !important;
+    }
+    h2 {
+        font-size: 1.55rem !important;
+    }
+    .brand {
+        display: flex;
+        align-items: center;
+        gap: .7rem;
+        color: var(--navy);
+        font-weight: 800;
+        font-size: 1.05rem;
+        margin-bottom: 2.2rem;
+    }
+    .brand-mark {
+        width: 38px;
+        height: 38px;
+        display: grid;
+        place-items: center;
+        border-radius: 12px;
+        background: var(--navy);
+        color: white;
+        font-size: 1.1rem;
+    }
+    .hero {
+        display: grid;
+        grid-template-columns: 1fr 380px;
+        gap: 2.5rem;
+        align-items: end;
+        padding-bottom: 2rem;
+        border-bottom: 1px solid var(--line);
+    }
+    .hero-copy {
+        max-width: 680px;
+        color: var(--muted);
+        font-size: 1.03rem;
+        line-height: 1.65;
+    }
+    .stats-row {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        overflow: hidden;
+        box-shadow: 0 10px 30px rgba(32, 48, 74, .05);
+    }
+    .stat {
+        padding: 1.15rem 1.2rem;
+        border-right: 1px solid var(--line);
+    }
+    .stat:last-child {
+        border-right: none;
+    }
+    .stat-value {
+        color: var(--navy);
+        font-size: 1.55rem;
+        font-weight: 800;
+        line-height: 1;
+    }
+    .stat-label {
+        color: var(--muted);
+        font-size: .74rem;
+        margin-top: .45rem;
+    }
+    div[data-testid="stTabs"] {
+        margin-top: 1.25rem;
+    }
+    div[data-baseweb="tab-list"] {
+        gap: .35rem;
+        border-bottom: 1px solid var(--line);
+    }
+    button[data-baseweb="tab"] {
+        color: var(--muted);
+        font-weight: 700;
+        padding: .75rem 1rem;
+    }
+    button[data-baseweb="tab"][aria-selected="true"] {
+        color: var(--blue);
+    }
+    div[data-testid="stFileUploader"] section {
+        border: 1.5px dashed #cbd4e5;
+        border-radius: 14px;
+        background: #fafbfe;
+        min-height: 150px;
+        display: grid;
+        align-content: center;
+    }
+    div[data-testid="stFileUploader"] section:hover {
+        border-color: var(--blue);
+        background: var(--blue-soft);
+    }
+    .stButton > button {
+        border-radius: 10px;
+        min-height: 46px;
+        font-weight: 800;
+        border: none;
+    }
+    .stButton > button[kind="primary"] {
+        background: var(--blue);
+        color: white;
+        box-shadow: 0 8px 18px rgba(49, 87, 213, .18);
+    }
+    .results-heading {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        margin: 1.9rem 0 .75rem;
+    }
+    .results-heading h2 {
+        margin: 0;
+    }
+    .result-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: .8rem;
+    }
+    .result-card {
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 1.1rem;
+        box-shadow: 0 8px 24px rgba(32, 48, 74, .04);
+    }
+    .result-card:first-child {
+        grid-column: 1 / -1;
+        border-left: 4px solid var(--green);
+    }
+    .rank-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+    }
+    .rank {
+        color: var(--blue);
+        font-size: .72rem;
+        font-weight: 800;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+    }
+    .score {
+        color: var(--green);
+        background: #ecf8f3;
+        border-radius: 999px;
+        padding: .35rem .65rem;
+        font-size: .78rem;
+        font-weight: 800;
+    }
+    .instrument {
+        color: var(--navy);
+        font-size: 1.15rem;
+        font-weight: 800;
+        margin: .55rem 0 .25rem;
+    }
+    .file-name {
+        color: var(--muted);
+        font-size: .78rem;
+        overflow-wrap: anywhere;
+    }
+    div[data-testid="stMetric"] {
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: .85rem 1rem;
+    }
+    .process-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: .7rem;
+        margin-top: .8rem;
+    }
+    .process-step {
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 1rem;
+    }
+    .process-number {
+        color: var(--blue);
+        font-size: .72rem;
+        font-weight: 800;
+    }
+    .process-title {
+        color: var(--navy);
+        font-weight: 800;
+        margin: .45rem 0 .25rem;
+    }
+    .process-text {
+        color: var(--muted);
+        font-size: .78rem;
+        line-height: 1.5;
+    }
+    @media (max-width: 800px) {
+        .block-container { padding: 1.25rem 1rem 3rem; }
+        h1 { font-size: 2.45rem !important; }
+        .hero { grid-template-columns: 1fr; gap: 1.25rem; }
+        .stats-row { max-width: none; }
+        .result-grid, .process-grid { grid-template-columns: 1fr; }
+        .result-card:first-child { grid-column: auto; }
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -78,137 +298,168 @@ def database_summary() -> tuple[int, int, pd.DataFrame]:
     return total, feature_total, labels
 
 
-def feature_table(vector: np.ndarray) -> pd.DataFrame:
-    rows = []
-    for group, (start, end) in FEATURE_GROUPS.items():
-        values = vector[start:end]
-        rows.append({"Nhóm đặc trưng": group, "Số chiều": end - start, "Trung bình": float(values.mean()), "Độ lệch chuẩn": float(values.std())})
-    return pd.DataFrame(rows)
-
-
-def feature_structure_table(vector: np.ndarray | None = None) -> pd.DataFrame:
-    rows = []
-    for group, (start, end) in FEATURE_GROUPS.items():
-        row = {
-            "Nhóm đặc trưng": group,
-            "Vị trí trong vector": f"{start + 1} - {end}",
-            "Số chiều": end - start,
-            "Trạng thái": "Đã tính từ truy vấn" if vector is not None else "Chờ dữ liệu",
-        }
-        if vector is not None:
-            values = vector[start:end]
-            row["Giá trị trung bình"] = round(float(values.mean()), 5)
-            row["Độ lệch chuẩn"] = round(float(values.std()), 5)
-        rows.append(row)
-    return pd.DataFrame(rows)
-
-
 def render_result(rank: int, result: dict) -> None:
     path = Path(result["file_path"])
     score = 100 * np.exp(-result["distance"] / 10)
+    instrument = INSTRUMENT_NAMES.get(
+        result["instrument"],
+        result["instrument"].replace("_", " ").title(),
+    )
+
     st.markdown(
-        f'<div class="result-card"><span class="rank">RANK {rank:02d}</span> &nbsp; '
-        f'<span class="result-title">{result["instrument"].replace("_", " ").title()}</span>'
-        f'<br><span class="path">{result["file_path"]}</span></div>',
+        f"""
+        <div class="result-card">
+            <div class="rank-row">
+                <span class="rank">Kết quả #{rank:02d}</span>
+                <span class="score">{score:.1f}% tương đồng</span>
+            </div>
+            <div class="instrument">{instrument}</div>
+            <div class="file-name">{path.name}</div>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
-    left, right = st.columns([3, 1])
-    with left:
-        if path.exists():
-            st.audio(str(path))
-    with right:
-        st.metric("Độ tương đồng", f"{score:.1f}%")
-        st.caption(f"Khoảng cách Euclid: {result['distance']:.3f}")
+    if path.exists():
+        st.audio(str(path))
 
-
-st.markdown('<div class="eyebrow">Hệ thống truy vấn thông tin âm thanh / 2026</div>', unsafe_allow_html=True)
-st.title("Tìm kiếm đoạn nhạc\ntương đồng.")
-st.markdown('<p class="lede">Cơ sở dữ liệu âm thanh gồm 500 đoạn nhạc không lời. Tải lên một file mới để hệ thống xếp hạng 5 bản ghi gần nhất dựa trên chữ ký âm thanh 90 chiều.</p>', unsafe_allow_html=True)
-st.markdown('<div class="status-line"><span class="status-dot"></span> Cơ sở dữ liệu đang hoạt động · 500 bản ghi · 10 nhạc cụ</div><div class="hero-rule"></div>', unsafe_allow_html=True)
 
 total_tracks, feature_total, label_counts = database_summary()
-metric_columns = st.columns(4)
-for column, value, label in zip(metric_columns, [total_tracks, len(label_counts), 90, feature_total], ["Đoạn nhạc đã lập chỉ mục", "Loại nhạc cụ", "Chiều đặc trưng", "Vector đã lưu"]):
-    with column:
-        st.markdown(f'<div class="metric-card"><div class="metric-value">{value}</div><div class="metric-label">{label}</div></div>', unsafe_allow_html=True)
 
-search_tab, evidence_tab, system_tab = st.tabs(["Tìm kiếm", "Dữ liệu trung gian", "Thông tin hệ thống"])
+st.markdown(
+    '<div class="brand"><span class="brand-mark">♪</span><span>TÌM KIẾM ÂM THANH</span></div>',
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    f"""
+    <div class="hero">
+        <div>
+            <h1>Tìm kiếm âm thanh<br>tương đồng</h1>
+            <div class="hero-copy">Tải một đoạn nhạc lên để xác định nhanh những bản ghi có đặc trưng âm thanh gần giống nhất trong hệ thống.</div>
+        </div>
+        <div class="stats-row">
+            <div class="stat"><div class="stat-value">{total_tracks}</div><div class="stat-label">Bản ghi</div></div>
+            <div class="stat"><div class="stat-value">{len(label_counts)}</div><div class="stat-label">Nhạc cụ</div></div>
+            <div class="stat"><div class="stat-value">90</div><div class="stat-label">Đặc trưng</div></div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+search_tab, system_tab = st.tabs(["Tìm kiếm", "Thông tin hệ thống"])
 
 with search_tab:
-    st.markdown('<div class="section-kicker">Không gian truy vấn</div>', unsafe_allow_html=True)
-    st.subheader("Tìm kiếm bằng file âm thanh mới")
-    query_file = st.file_uploader("Kéo thả file âm thanh vào đây", type=AUDIO_TYPES, help="Định dạng hỗ trợ: WAV, MP3, FLAC, OGG, M4A")
-    if query_file:
-        st.audio(query_file)
-        with tempfile.NamedTemporaryFile(suffix=Path(query_file.name).suffix, delete=False) as temporary_file:
-            temporary_file.write(query_file.getbuffer())
-            query_path = Path(temporary_file.name)
-        if st.button("Bắt đầu tìm kiếm", type="primary", use_container_width=True):
+    left, right = st.columns([1.08, 1.92], gap="large")
+
+    with left:
+        st.subheader("Thêm file truy vấn")
+        query_file = st.file_uploader(
+            "Tải lên file âm thanh",
+            type=AUDIO_TYPES,
+            help="Hỗ trợ WAV, MP3, FLAC, OGG và M4A",
+        )
+        if query_file:
+            st.audio(query_file)
+        search_clicked = st.button(
+            "Tìm kiếm bản ghi giống nhất",
+            type="primary",
+            width="stretch",
+            disabled=query_file is None,
+        )
+
+    with right:
+        st.subheader("Kết quả")
+        query_state = st.session_state.get("last_query")
+
+        if search_clicked and query_file:
             if not DATABASE_PATH.exists() or not SCALER_PATH.exists():
-                st.error("Thiếu database hoặc scaler. Hãy chạy pipeline tiền xử lý trước.")
+                st.error("Thiếu cơ sở dữ liệu hoặc bộ chuẩn hóa. Hãy chạy pipeline tiền xử lý trước.")
             else:
-                with st.spinner("Đang trích xuất đặc trưng và xếp hạng database..."):
+                with tempfile.NamedTemporaryFile(
+                    suffix=Path(query_file.name).suffix,
+                    delete=False,
+                ) as temporary_file:
+                    temporary_file.write(query_file.getbuffer())
+                    query_path = Path(temporary_file.name)
+
+                with st.spinner("Đang phân tích và so khớp âm thanh..."):
                     try:
-                        raw_vector = extract_features(query_path)
-                        scaler = joblib.load(SCALER_PATH)
-                        scaled_vector = scaler.transform([raw_vector])[0]
-                        results = search_similar(query_path, DATABASE_PATH, SCALER_PATH, 5)
-                        st.session_state["last_query"] = {"name": query_file.name, "raw": raw_vector, "scaled": scaled_vector, "results": results}
+                        results = search_similar(
+                            query_path,
+                            DATABASE_PATH,
+                            SCALER_PATH,
+                            5,
+                        )
+                        st.session_state["last_query"] = {
+                            "name": query_file.name,
+                            "results": results,
+                        }
+                        query_state = st.session_state["last_query"]
                     except Exception as error:
                         st.error(f"Không thể xử lý file này: {error}")
+                    finally:
+                        query_path.unlink(missing_ok=True)
 
-    query_state = st.session_state.get("last_query")
-    if query_state:
-        st.divider()
-        st.subheader(f"5 kết quả gần nhất cho {query_state['name']}")
-        for rank, result in enumerate(query_state["results"], start=1):
-            render_result(rank, result)
-
-with evidence_tab:
-    st.subheader("Dữ liệu mà mô hình sử dụng")
-    query_state = st.session_state.get("last_query")
-    raw_vector = query_state["raw"] if query_state else None
-    structure_columns = st.columns(3)
-    structure_values = [
-        ("Cấu trúc vector", "90 chiều"),
-        ("Nhóm đặc trưng", str(len(FEATURE_GROUPS))),
-        ("Trạng thái", "Đã cập nhật" if raw_vector is not None else "Mô hình chờ dữ liệu"),
-    ]
-    for column, (label, value) in zip(structure_columns, structure_values):
-        with column:
-            st.metric(label, value)
-    st.markdown("**Mô hình cấu trúc đặc trưng**")
-    st.caption("Mỗi nhóm chiếm một vùng cố định trong vector 90 chiều. Bảng sẽ tự thay đổi giá trị khi có file truy vấn.")
-    st.dataframe(feature_structure_table(raw_vector), use_container_width=True, hide_index=True)
-    if not query_state:
-        st.info("Mô hình cấu trúc đang ở trạng thái chờ dữ liệu. Hãy thực hiện một lần tìm kiếm để cập nhật các giá trị thực tế.")
-    else:
-        scaled_vector = query_state["scaled"]
-        st.caption(f"Vector truy vấn: {len(raw_vector)} chiều | âm thanh chuẩn hóa về 3 giây, tần số 22.050 Hz")
-        st.dataframe(feature_table(raw_vector), use_container_width=True, hide_index=True)
-        chart_frame = pd.DataFrame({"Giá trị gốc": raw_vector, "Giá trị chuẩn hóa": scaled_vector})
-        st.line_chart(chart_frame, height=300)
-        st.subheader("Tính toán xếp hạng")
-        distance_frame = pd.DataFrame([
-            {"Thứ hạng": index, "Nhạc cụ": item["instrument"], "Khoảng cách": item["distance"], "Điểm tương đồng": 100 * np.exp(-item["distance"] / 10)}
-            for index, item in enumerate(query_state["results"], start=1)
-        ])
-        st.dataframe(distance_frame, use_container_width=True, hide_index=True)
-        st.caption("Điểm tương đồng được quy đổi từ khoảng cách Euclid theo công thức 100 x exp(-distance / 10). Hệ thống xếp hạng theo khoảng cách nhỏ nhất.")
+        if query_state:
+            st.caption(f"Top 5 bản ghi cho {query_state['name']}")
+            for rank, result in enumerate(query_state["results"], start=1):
+                render_result(rank, result)
+        else:
+            st.markdown(
+                """
+                <div style="height:280px;display:grid;place-items:center;text-align:center;
+                border:1px dashed #dce2ec;border-radius:16px;background:white;color:#697586;">
+                    <div>
+                        <div style="font-size:2rem;margin-bottom:.5rem;">♪</div>
+                        <div style="font-weight:700;color:#17232f;">Sẵn sàng tìm kiếm</div>
+                        <div style="font-size:.82rem;margin-top:.35rem;">Tải lên một file âm thanh để bắt đầu</div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 with system_tab:
-    st.subheader("Sơ đồ khối hệ thống")
-    st.graphviz_chart(
-        """digraph { rankdir=LR; node [shape=box style=rounded color=\"#152323\" fontname=\"Space Grotesk\"]; A [label=\"File am thanh truy van\"]; B [label=\"Tien xu ly\\nmono / 3s / 22.05kHz\"]; C [label=\"Trich xuat dac trung\\nMFCC + pho + chroma\"]; D [label=\"StandardScaler\"]; E [label=\"CSDL dac trung SQLite\\n500 vector\"]; F [label=\"Xep hang bang Euclid\"]; G [label=\"5 ket qua\"]; A -> B -> C -> D -> F -> G; E -> F; }"""
+    st.subheader("Tổng quan dữ liệu")
+    metric_columns = st.columns(4)
+    metrics = [
+        ("Bản ghi", total_tracks),
+        ("Nhạc cụ", len(label_counts)),
+        ("Vector đặc trưng", feature_total),
+        ("Chiều vector", 90),
+    ]
+    for column, (label, value) in zip(metric_columns, metrics):
+        with column:
+            st.metric(label, value)
+
+    st.subheader("Quy trình tìm kiếm")
+    st.markdown(
+        """
+        <div class="process-grid">
+            <div class="process-step"><div class="process-number">01</div><div class="process-title">Tải file</div><div class="process-text">Nhận một file âm thanh nguồn từ giao diện.</div></div>
+            <div class="process-step"><div class="process-number">02</div><div class="process-title">Tiền xử lý</div><div class="process-text">Chuyển mono, lấy mẫu và chuẩn hóa thành 3 giây.</div></div>
+            <div class="process-step"><div class="process-number">03</div><div class="process-title">Trích đặc trưng</div><div class="process-text">Tạo vector 90 chiều từ các đặc trưng âm thanh.</div></div>
+            <div class="process-step"><div class="process-number">04</div><div class="process-title">So khớp</div><div class="process-text">Xếp hạng bằng khoảng cách Euclid và trả về top 5.</div></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    st.markdown("**Quy trình xử lý**")
-    st.write("1. Âm thanh được chuyển về mono, lấy mẫu lại ở 22.050 Hz và cắt hoặc bổ sung để dài 3 giây.")
-    st.write("2. Bộ trích xuất tính MFCC, chroma, độ tương phản phổ, tâm trọng phổ, độ rộng phổ, ngưỡng cuộn phổ, độ phẳng phổ, tỉ lệ qua điểm 0 và năng lượng RMS; trung bình và độ lệch chuẩn tạo thành 90 giá trị.")
-    st.write("3. StandardScaler đưa các chiều về cùng thang đo. SQLite lưu thông tin file và vector đặc trưng liên kết.")
-    st.write("4. Vector truy vấn được so sánh với mọi vector trong database bằng khoảng cách Euclid. Năm kết quả có khoảng cách nhỏ nhất được trả về.")
-    st.subheader("Thống kê bộ dữ liệu")
+
     if not label_counts.empty:
-        st.bar_chart(label_counts.set_index("instrument"), height=280)
-        st.dataframe(label_counts, use_container_width=True, hide_index=True)
-    st.subheader("Đánh giá nhanh")
-    st.write("Bộ dữ liệu gồm 10 loại nhạc cụ cân bằng, mỗi loại 50 đoạn nhạc và 500 vector đặc trưng. Kiểm tra tự truy vấn đạt file sẽ đặt hạng 1 với khoảng cách gần 0; chất lượng tìm kiếm liên lớp có thể đánh giá bằng precision@5 và MRR trong src/evaluation.py.")
+        st.subheader("Phân bố nhạc cụ")
+        left, right = st.columns([1.7, 1])
+        with left:
+            chart_frame = label_counts.copy()
+            chart_frame["instrument"] = chart_frame["instrument"].map(
+                lambda name: INSTRUMENT_NAMES.get(name, name)
+            )
+            chart_frame = chart_frame.set_index("instrument")
+            st.bar_chart(chart_frame, height=260)
+        with right:
+            display_counts = label_counts.copy()
+            display_counts["instrument"] = display_counts["instrument"].map(
+                lambda name: INSTRUMENT_NAMES.get(name, name)
+            )
+            display_counts.columns = ["Nhạc cụ", "Số lượng"]
+            st.dataframe(display_counts, width="stretch", hide_index=True)
